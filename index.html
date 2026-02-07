@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Boeing Flyer - Pixel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            touch-action: none;
+        }
+
+        #gameContainer {
+            position: relative;
+            max-width: 100vw;
+        }
+
+        canvas {
+            display: block;
+            background: #87CEEB;
+            border: 4px solid #333;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+
+        #score {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+            text-shadow: 2px 2px 0 #fff;
+        }
+
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+
+        #gameOver h2 {
+            margin-bottom: 20px;
+            font-size: 36px;
+        }
+
+        #gameOver button {
+            padding: 15px 30px;
+            font-size: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+        }
+
+        #gameOver button:active {
+            transform: scale(0.95);
+        }
+
+        #startScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="score">0</div>
+        <div id="startScreen">TAP TO START</div>
+        <div id="gameOver">
+            <h2>CRASHED!</h2>
+            <p id="finalScore"></p>
+            <button onclick="resetGame()">TRY AGAIN</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        canvas.width = Math.min(400, window.innerWidth - 20);
+        canvas.height = 600;
+
+        // Game variables
+        let plane = {
+            x: 80,
+            y: canvas.height / 2,
+            width: 40,
+            height: 20,
+            velocity: 0,
+            gravity: 0.15,
+            jump: -6
+        };
+
+        let buildings = [];
+        let score = 0;
+        let gameStarted = false;
+        let gameRunning = false;
+        let frameCount = 0;
+        let gravityDelay = 180; // 3 seconds before gravity kicks in
+
+        const gap = 200;
+        const buildingWidth = 60;
+        const buildingSpeed = 1;
+
+        // Draw pixel plane
+        function drawPlane() {
+            ctx.fillStyle = '#333';
+            
+            // Fuselage
+            ctx.fillRect(plane.x, plane.y, plane.width, plane.height);
+            
+            // Cockpit
+            ctx.fillRect(plane.x, plane.y + 5, 15, 10);
+            
+            // Wings
+            ctx.fillRect(plane.x + 10, plane.y + plane.height - 5, 25, 3);
+            
+            // Tail
+            ctx.fillRect(plane.x + plane.width - 8, plane.y - 8, 8, 8);
+            
+            // Windows
+            ctx.fillStyle = '#87CEEB';
+            for (let i = 0; i < 3; i++) {
+                ctx.fillRect(plane.x + 15 + i * 8, plane.y + 6, 4, 4);
+            }
+        }
+
+        // Draw pixel buildings
+        function drawBuilding(building) {
+            ctx.fillStyle = '#555';
+            
+            // Top building
+            ctx.fillRect(building.x, 0, buildingWidth, building.top);
+            
+            // Bottom building
+            ctx.fillRect(building.x, building.top + gap, buildingWidth, canvas.height - building.top - gap);
+            
+            // Windows on buildings
+            ctx.fillStyle = '#FFD700';
+            for (let i = 10; i < building.top; i += 20) {
+                for (let j = 10; j < buildingWidth - 10; j += 15) {
+                    ctx.fillRect(building.x + j, i, 8, 8);
+                }
+            }
+            for (let i = building.top + gap + 10; i < canvas.height; i += 20) {
+                for (let j = 10; j < buildingWidth - 10; j += 15) {
+                    ctx.fillRect(building.x + j, i, 8, 8);
+                }
+            }
+        }
+
+        // Check collision
+        function checkCollision(building) {
+            if (plane.x + plane.width > building.x && plane.x < building.x + buildingWidth) {
+                if (plane.y < building.top || plane.y + plane.height > building.top + gap) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update plane
+            if (gravityDelay > 0) {
+                gravityDelay--;
+            } else {
+                plane.velocity += plane.gravity;
+                // Air resistance to slow down falling
+                plane.velocity *= 0.98;
+            }
+            plane.y += plane.velocity;
+
+            // Check bounds
+            if (plane.y + plane.height > canvas.height || plane.y < 0) {
+                endGame();
+                return;
+            }
+
+            // Update buildings
+            frameCount++;
+            if (frameCount % 150 === 0) {
+                const topHeight = Math.random() * (canvas.height - gap - 100) + 50;
+                buildings.push({
+                    x: canvas.width,
+                    top: topHeight,
+                    scored: false
+                });
+            }
+
+            for (let i = buildings.length - 1; i >= 0; i--) {
+                buildings[i].x -= buildingSpeed;
+
+                if (checkCollision(buildings[i])) {
+                    endGame();
+                    return;
+                }
+
+                if (!buildings[i].scored && buildings[i].x + buildingWidth < plane.x) {
+                    score++;
+                    buildings[i].scored = true;
+                    document.getElementById('score').textContent = score;
+                }
+
+                if (buildings[i].x + buildingWidth < 0) {
+                    buildings.splice(i, 1);
+                }
+            }
+
+            // Draw everything
+            buildings.forEach(drawBuilding);
+            drawPlane();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            if (!gameStarted) {
+                gameStarted = true;
+                gameRunning = true;
+                document.getElementById('startScreen').style.display = 'none';
+                gameLoop();
+            }
+        }
+
+        function jump() {
+            if (gameRunning && gravityDelay === 0) {
+                plane.velocity = plane.jump;
+            }
+        }
+
+        function endGame() {
+            gameRunning = false;
+            document.getElementById('finalScore').textContent = `Score: ${score}`;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        function resetGame() {
+            plane.y = canvas.height / 2;
+            plane.velocity = 0;
+            buildings = [];
+            score = 0;
+            frameCount = 0;
+            gravityDelay = 180;
+            document.getElementById('score').textContent = '0';
+            document.getElementById('gameOver').style.display = 'none';
+            gameRunning = true;
+            gameLoop();
+        }
+
+        // Controls
+        canvas.addEventListener('click', () => {
+            startGame();
+            jump();
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            startGame();
+            jump();
+        });
+
+        // Initial draw
+        drawPlane();
+    </script>
+</body>
+</html>
